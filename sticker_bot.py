@@ -1,7 +1,6 @@
 import gzip
 import json
 import os
-import copy
 import tempfile
 from pyrogram import Client, filters
 from pyrogram.types import (
@@ -17,31 +16,29 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 app = Client("sticker_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ── In-memory session store ──────────────────────────────
-# Structure: { user_id: { "json": {...}, "path": "...", "edits": { layer_name: {...} } } }
 sessions: dict = {}
 
-# ── Known layer names (tune these to match your JSON files) ──
-KNOWN_LAYERS = ["logo", "border", "solid", "black logo"]
-
-# ── Color presets ────────────────────────────────────────
-COLOR_PRESETS = {
-    "red":    [1.0, 0.0, 0.0, 1.0],
-    "green":  [0.0, 1.0, 0.0, 1.0],
-    "blue":   [0.0, 0.0, 1.0, 1.0],
-    "white":  [1.0, 1.0, 1.0, 1.0],
-    "black":  [0.0, 0.0, 0.0, 1.0],
-    "yellow": [1.0, 1.0, 0.0, 1.0],
-    "purple": [0.5, 0.0, 0.5, 1.0],
-    "orange": [1.0, 0.5, 0.0, 1.0],
-    "pink":   [1.0, 0.4, 0.7, 1.0],
-    "cyan":   [0.0, 1.0, 1.0, 1.0],
+# ── Color presets (RGBA 0.0-1.0) ─────────────────────────
+COLORS = {
+    "🔴 Red":    [1.0, 0.0, 0.0, 1.0],
+    "🟢 Green":  [0.0, 0.8, 0.0, 1.0],
+    "🔵 Blue":   [0.0, 0.3, 1.0, 1.0],
+    "⚪ White":  [1.0, 1.0, 1.0, 1.0],
+    "⚫ Black":  [0.0, 0.0, 0.0, 1.0],
+    "🟡 Yellow": [1.0, 0.9, 0.0, 1.0],
+    "🟣 Purple": [0.5, 0.0, 0.8, 1.0],
+    "🟠 Orange": [1.0, 0.5, 0.0, 1.0],
+    "🩷 Pink":   [1.0, 0.3, 0.6, 1.0],
+    "🩵 Cyan":   [0.0, 0.9, 1.0, 1.0],
+    "🟤 Brown":  [0.5, 0.25, 0.0, 1.0],
+    "🌿 Olive":  [0.4, 0.6, 0.0, 1.0],
 }
 
-# ── Lottie helpers ───────────────────────────────────────
+COLOR_KEYS = list(COLORS.keys())  # stable order for index
+
+# ── Lottie load/save ─────────────────────────────────────
 
 def load_lottie(path: str) -> dict:
-    """Load .json or .tgs into a dict."""
     if path.endswith(".tgs"):
         with gzip.open(path, "rb") as f:
             return json.loads(f.read())
@@ -49,375 +46,339 @@ def load_lottie(path: str) -> dict:
         return json.load(f)
 
 
-def save_lottie_as_tgs(data: dict, out_path: str):
-    """Dump dict → gzip → .tgs"""
+def save_tgs(data: dict, out_path: str):
     raw = json.dumps(data, separators=(",", ":")).encode()
     with gzip.open(out_path, "wb") as f:
         f.write(raw)
 
 
-def get_layer_names(data: dict) -> list[str]:
-    """Return all layer nm fields from the Lottie JSON."""
-    return [l.get("nm", "") for l in data.get("layers", [])]
+# ── Build a human-readable label for each layer ───────────
+def describe_layers(data: dict) -> list[dict]:
+    """
+    Returns list of:
+      { "label": str, "source": "top"|"asset", "asset_id": str|None, "index": int }
+    Only layers that have fl/st colors (editable) or are precomps (logo).
+    """
+    result = []
+
+    def has_colors(obj):
+        if isinstance(obj, dict):
+            if obj.get("ty") in ("fl", "st"):
+                return True
+            return any(has_colors(v) for v in obj.values())
+        if isinstance(obj, list):
+            return any(has_colors(v) for v in obj)
+        return False
+
+    # Top-level layers
+    for i, layer in enumerate(data.get("layers", [])):
+        ty = layer.get("ty")
+        if ty == 0:  # precomp = logo
+            ref = layer.get("refId", f"precomp_{i}")
+            result.append({
+                "label": f"Logo ({ref})",
+                "source": "top",
+                "index": i,
+                "asset_id": None,
+                "ty": ty,
+            })
+        elif ty == 4 and has_colors(layer.get("shapes", [])):
+            # Give it a positional name
+            shape_count = len(layer.get("shapes", []))
+            result.append({
+                "label": f"Shape Layer {i} (ind={layer.get('ind')})",
+                "source": "top",
+                "index": i,
+                "asset_id": None,
+                "ty": ty,
+            })
+
+    # Asset layers
+    for asset in data.get("assets", []):
+        aid = asset.get("id", "?")
+        for i, layer in enumerate(asset.get("layers", [])):
+            if has_colors(layer):
+                result.append({
+                    "label": f"Asset '{aid}' L{i}",
+                    "source": "asset",
+                    "index": i,
+                    "asset_id": aid,
+                    "ty": layer.get("ty"),
+                })
+
+    return result
 
 
-def find_layer(data: dict, name: str):
-    """Find a layer by nm (case-insensitive partial match)."""
-    name_lower = name.lower()
-    for layer in data.get("layers", []):
-        if name_lower in layer.get("nm", "").lower():
-            return layer
-    return None
+# ── Color manipulation ────────────────────────────────────
+
+def set_all_colors(obj, rgba: list):
+    """Recursively set ALL fl/st colors in obj to rgba."""
+    if isinstance(obj, dict):
+        if obj.get("ty") in ("fl", "st"):
+            c = obj.get("c", {})
+            k = c.get("k")
+            if isinstance(k, list):
+                if len(k) == 4 and isinstance(k[0], (int, float)):
+                    c["k"] = rgba  # static
+                else:
+                    for kf in k:  # animated keyframes
+                        if isinstance(kf, dict) and "s" in kf:
+                            kf["s"] = rgba
+        for v in obj.values():
+            set_all_colors(v, rgba)
+    elif isinstance(obj, list):
+        for v in obj:
+            set_all_colors(v, rgba)
 
 
-def set_layer_visibility(data: dict, name: str, visible: bool):
-    """Toggle layer hidden flag (hd field)."""
-    layer = find_layer(data, name)
+def apply_color_to_layer(data: dict, layer_info: dict, rgba: list):
+    if layer_info["source"] == "top":
+        layer = data["layers"][layer_info["index"]]
+        set_all_colors(layer, rgba)
+    else:
+        for asset in data.get("assets", []):
+            if asset.get("id") == layer_info["asset_id"]:
+                layer = asset["layers"][layer_info["index"]]
+                set_all_colors(layer, rgba)
+
+
+def toggle_layer_visibility(data: dict, layer_info: dict, visible: bool):
+    if layer_info["source"] == "top":
+        layer = data["layers"][layer_info["index"]]
+    else:
+        layer = None
+        for asset in data.get("assets", []):
+            if asset.get("id") == layer_info["asset_id"]:
+                layer = asset["layers"][layer_info["index"]]
     if layer is not None:
         layer["hd"] = not visible
 
 
-def recolor_layer(data: dict, name: str, rgba: list):
-    """
-    Walk through a layer's shapes/items and recolor all fill/stroke colors.
-    rgba = [r, g, b, a]  values 0.0–1.0
-    """
-    layer = find_layer(data, name)
-    if layer is None:
-        return
+# ── Keyboard builders ─────────────────────────────────────
 
-    def walk(obj):
-        if isinstance(obj, dict):
-            # Lottie solid color: { "ty": "fl" } or { "ty": "st" }
-            if obj.get("ty") in ("fl", "st"):
-                c = obj.get("c", {})
-                if isinstance(c.get("k"), list):
-                    # Static color
-                    if len(c["k"]) == 4 and isinstance(c["k"][0], (int, float)):
-                        c["k"] = rgba
-                    # Animated keyframes — patch every keyframe
-                    else:
-                        for kf in c["k"]:
-                            if isinstance(kf, dict) and "s" in kf:
-                                kf["s"] = rgba
-            for v in obj.values():
-                walk(v)
-        elif isinstance(obj, list):
-            for item in obj:
-                walk(item)
-
-    walk(layer)
-
-
-def scale_layer(data: dict, name: str, sx: float, sy: float):
-    """
-    Patch the transform scale of a layer.
-    sx, sy: scale percentage (100 = original size).
-    """
-    layer = find_layer(data, name)
-    if layer is None:
-        return
-    ks = layer.get("ks", {})
-    s = ks.get("s", {})
-    if isinstance(s.get("k"), list):
-        k = s["k"]
-        # Static [sx, sy, sz]
-        if len(k) >= 2 and isinstance(k[0], (int, float)):
-            s["k"] = [sx, sy, k[2] if len(k) > 2 else 100]
-        else:
-            # Animated keyframes
-            for kf in k:
-                if isinstance(kf, dict) and "s" in kf:
-                    kf["s"] = [sx, sy, kf["s"][2] if len(kf["s"]) > 2 else 100]
-
-
-def rotate_layer(data: dict, name: str, degrees: float):
-    """Patch static rotation of a layer's transform."""
-    layer = find_layer(data, name)
-    if layer is None:
-        return
-    ks = layer.get("ks", {})
-    r = ks.get("r", {})
-    if isinstance(r.get("k"), (int, float)):
-        r["k"] = degrees
-    elif isinstance(r.get("k"), list):
-        for kf in r["k"]:
-            if isinstance(kf, dict) and "s" in kf:
-                kf["s"] = [degrees]
-
-
-# ── Keyboard builders ────────────────────────────────────
-
-def main_menu_kb(layer_names: list[str]) -> InlineKeyboardMarkup:
-    """Show one button per detected layer + Done."""
+def main_menu_kb(layers: list[dict]) -> InlineKeyboardMarkup:
     rows = []
-    for nm in layer_names:
-        rows.append([InlineKeyboardButton(f"✏️ {nm}", callback_data=f"layer|{nm}")])
-    rows.append([InlineKeyboardButton("✅ Done — export sticker", callback_data="export")])
+    for i, info in enumerate(layers):
+        rows.append([InlineKeyboardButton(f"✏️ {info['label']}", callback_data=f"L{i}")])
+    rows.append([InlineKeyboardButton("✅ Export Sticker", callback_data="EXPORT")])
     return InlineKeyboardMarkup(rows)
 
 
-def layer_menu_kb(layer_name: str) -> InlineKeyboardMarkup:
+def layer_actions_kb(li: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("👁 Show",  callback_data=f"vis|{layer_name}|1"),
-            InlineKeyboardButton("🙈 Hide",  callback_data=f"vis|{layer_name}|0"),
+            InlineKeyboardButton("👁 Show",   callback_data=f"VIS_{li}_1"),
+            InlineKeyboardButton("🙈 Hide",   callback_data=f"VIS_{li}_0"),
         ],
-        [InlineKeyboardButton("🎨 Recolor", callback_data=f"recolor|{layer_name}")],
-        [InlineKeyboardButton("📐 Scale",   callback_data=f"scale|{layer_name}")],
-        [InlineKeyboardButton("🔄 Rotate",  callback_data=f"rotate|{layer_name}")],
-        [InlineKeyboardButton("⬅️ Back",    callback_data="back")],
+        [InlineKeyboardButton("🎨 Change Color", callback_data=f"CLR_{li}_0")],
+        [InlineKeyboardButton("⬅️ Back",         callback_data="BACK")],
     ])
 
 
-def color_picker_kb(layer_name: str) -> InlineKeyboardMarkup:
-    rows = []
-    row = []
-    for cname in COLOR_PRESETS:
-        row.append(InlineKeyboardButton(cname.capitalize(), callback_data=f"color|{layer_name}|{cname}"))
-        if len(row) == 3:
+def color_page_kb(li: int, page: int) -> InlineKeyboardMarkup:
+    per_page = 6
+    start = page * per_page
+    end   = min(start + per_page, len(COLOR_KEYS))
+    rows  = []
+    row   = []
+    for ci in range(start, end):
+        cname = COLOR_KEYS[ci]
+        row.append(InlineKeyboardButton(cname, callback_data=f"SETCLR_{li}_{ci}"))
+        if len(row) == 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅ Prev", callback_data=f"CLR_{li}_{page-1}"))
+    if end < len(COLOR_KEYS):
+        nav.append(InlineKeyboardButton("Next ➡", callback_data=f"CLR_{li}_{page+1}"))
+    if nav:
+        rows.append(nav)
+
     rows.append([
-        InlineKeyboardButton("✏️ Custom hex", callback_data=f"customcolor|{layer_name}"),
-        InlineKeyboardButton("⬅️ Back",       callback_data=f"layer|{layer_name}"),
+        InlineKeyboardButton("✏️ Custom Hex", callback_data=f"HEXINPUT_{li}"),
+        InlineKeyboardButton("⬅️ Back",       callback_data=f"L{li}"),
     ])
-    return InlineKeyboardMarkup(rows)
-
-
-def scale_kb(layer_name: str) -> InlineKeyboardMarkup:
-    scales = [("50%", 50), ("75%", 75), ("100%", 100), ("125%", 125), ("150%", 150)]
-    rows = [[InlineKeyboardButton(label, callback_data=f"doscale|{layer_name}|{v}") for label, v in scales]]
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"layer|{layer_name}")])
-    return InlineKeyboardMarkup(rows)
-
-
-def rotate_kb(layer_name: str) -> InlineKeyboardMarkup:
-    angles = [("0°", 0), ("45°", 45), ("90°", 90), ("135°", 135), ("180°", 180), ("-90°", -90)]
-    rows = [[InlineKeyboardButton(label, callback_data=f"dorotate|{layer_name}|{v}") for label, v in angles]]
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"layer|{layer_name}")])
     return InlineKeyboardMarkup(rows)
 
 
 # ── Handlers ─────────────────────────────────────────────
 
 @app.on_message(filters.command("start"))
-async def start(client: Client, message: Message):
+async def start(_, message: Message):
     await message.reply(
         "hey 👋\n\n"
-        "drop your `.json` or `.tgs` Lottie file and I'll let you\n"
-        "customize each layer — visibility, color, scale, rotation — "
-        "then export as a sticker 🔥\n\n"
+        "drop your `.json` or `.tgs` Lottie file\n"
+        "main saare layers detect karunga aur\n"
+        "colors change karne dunga — step by step 🎨\n\n"
         "━━━━━━━━━━━━━━━━━\n"
         "made by @GTK26"
     )
 
 
 @app.on_message(filters.document)
-async def handle_file(client: Client, message: Message):
+async def handle_file(_, message: Message):
     doc = message.document
     if not (doc.file_name.endswith(".json") or doc.file_name.endswith(".tgs")):
-        await message.reply("hey that format won't work 😅\njust send a .json or .tgs file")
+        await message.reply("sirf .json ya .tgs file bhejo 😅")
         return
 
-    await message.reply("loading layers... ⚙️")
-
-    # Download to a persistent temp dir per user
+    msg = await message.reply("loading layers... ⚙️")
     user_id = message.from_user.id
-    tmpdir = tempfile.mkdtemp(prefix=f"sbot_{user_id}_")
-    file_path = await message.download(file_name=os.path.join(tmpdir, doc.file_name))
+    tmpdir  = tempfile.mkdtemp(prefix=f"sbot_{user_id}_")
+    path    = await message.download(file_name=os.path.join(tmpdir, doc.file_name))
 
     try:
-        lottie = load_lottie(file_path)
+        lottie = load_lottie(path)
     except Exception as e:
-        await message.reply(f"couldn't parse the file 😬\n`{e}`")
+        await msg.edit(f"parse nahi hua 😬\n`{e}`")
         return
 
-    layer_names = get_layer_names(lottie)
-    if not layer_names:
-        await message.reply("no layers found in this file 🤔")
+    layers = describe_layers(lottie)
+    if not layers:
+        await msg.edit("koi editable layer nahi mili 🤔")
         return
 
     sessions[user_id] = {
-        "json":  lottie,
-        "path":  tmpdir,
-        "edits": {},
-        "waiting_for": None,   # for text input states
+        "json":   lottie,
+        "path":   tmpdir,
+        "layers": layers,
+        "waiting": None,
     }
 
-    text = "**Layers detected:**\n" + "\n".join(f"• `{n}`" for n in layer_names)
-    text += "\n\nChoose a layer to edit 👇"
-    await message.reply(text, reply_markup=main_menu_kb(layer_names))
+    text = "**Layers mili:**\n"
+    for i, info in enumerate(layers):
+        text += f"`{i}` — {info['label']}\n"
+    text += "\nKaunsi layer edit karni hai? 👇"
+
+    await msg.edit(text, reply_markup=main_menu_kb(layers))
 
 
 @app.on_callback_query()
-async def handle_callback(client: Client, query: CallbackQuery):
-    user_id = query.from_user.id
-    data    = query.data
-    session = sessions.get(user_id)
+async def cb(_, query: CallbackQuery):
+    uid  = query.from_user.id
+    data = query.data
+    sess = sessions.get(uid)
 
-    if session is None:
-        await query.answer("session expired — send your file again", show_alert=True)
+    if sess is None:
+        await query.answer("session khatam — dobara file bhejo", show_alert=True)
         return
 
-    lottie = session["json"]
-    layer_names = get_layer_names(lottie)
+    lottie = sess["json"]
+    layers = sess["layers"]
 
-    # ── back to main menu ──────────────────────────────
-    if data == "back":
+    # ── Back to main menu ──────────────────────────────
+    if data == "BACK":
+        text = "Kaunsi layer edit karni hai? 👇"
+        await query.message.edit_text(text, reply_markup=main_menu_kb(layers))
+
+    # ── Open layer menu ───────────────────────────────
+    elif data.startswith("L") and data[1:].isdigit():
+        li   = int(data[1:])
+        info = layers[li]
         await query.message.edit_text(
-            "Choose a layer to edit 👇",
-            reply_markup=main_menu_kb(layer_names)
+            f"**{info['label']}**\nKya change karna hai?",
+            reply_markup=layer_actions_kb(li)
         )
 
-    # ── open layer menu ────────────────────────────────
-    elif data.startswith("layer|"):
-        layer_name = data.split("|", 1)[1]
-        await query.message.edit_text(
-            f"**{layer_name}** — what do you want to change?",
-            reply_markup=layer_menu_kb(layer_name)
-        )
-
-    # ── visibility ────────────────────────────────────
-    elif data.startswith("vis|"):
-        _, layer_name, flag = data.split("|")
+    # ── Visibility ────────────────────────────────────
+    elif data.startswith("VIS_"):
+        _, li, flag = data.split("_")
+        li      = int(li)
         visible = flag == "1"
-        set_layer_visibility(lottie, layer_name, visible)
+        toggle_layer_visibility(lottie, layers[li], visible)
         state = "visible ✅" if visible else "hidden 🙈"
-        await query.answer(f"{layer_name} is now {state}")
+        await query.answer(f"{layers[li]['label']} → {state}")
         await query.message.edit_text(
-            f"**{layer_name}** — {state}\nWhat else?",
-            reply_markup=layer_menu_kb(layer_name)
+            f"**{layers[li]['label']}** — {state}\nAur kya karna hai?",
+            reply_markup=layer_actions_kb(li)
         )
 
-    # ── recolor menu ──────────────────────────────────
-    elif data.startswith("recolor|"):
-        layer_name = data.split("|", 1)[1]
+    # ── Color picker page ─────────────────────────────
+    elif data.startswith("CLR_"):
+        _, li, page = data.split("_")
+        li, page    = int(li), int(page)
         await query.message.edit_text(
-            f"Pick a color for **{layer_name}** 🎨",
-            reply_markup=color_picker_kb(layer_name)
+            f"**{layers[li]['label']}** ke liye color chuno 🎨",
+            reply_markup=color_page_kb(li, page)
         )
 
-    # ── apply preset color ────────────────────────────
-    elif data.startswith("color|"):
-        _, layer_name, cname = data.split("|")
-        rgba = COLOR_PRESETS[cname]
-        recolor_layer(lottie, layer_name, rgba)
-        await query.answer(f"colored {layer_name} → {cname} ✅")
+    # ── Apply preset color ────────────────────────────
+    elif data.startswith("SETCLR_"):
+        _, li, ci = data.split("_")
+        li, ci    = int(li), int(ci)
+        cname     = COLOR_KEYS[ci]
+        rgba      = COLORS[cname]
+        apply_color_to_layer(lottie, layers[li], rgba)
+        await query.answer(f"✅ {cname} apply hua!")
         await query.message.edit_text(
-            f"**{layer_name}** recolored to {cname}!\nWhat else?",
-            reply_markup=layer_menu_kb(layer_name)
+            f"**{layers[li]['label']}** → {cname} ✅\nAur kya karna hai?",
+            reply_markup=layer_actions_kb(li)
         )
 
-    # ── custom hex prompt ─────────────────────────────
-    elif data.startswith("customcolor|"):
-        layer_name = data.split("|", 1)[1]
-        session["waiting_for"] = ("hex", layer_name)
+    # ── Custom hex input prompt ───────────────────────
+    elif data.startswith("HEXINPUT_"):
+        li = int(data.split("_")[1])
+        sess["waiting"] = ("hex", li)
         await query.message.edit_text(
-            f"send a hex color for **{layer_name}**\nExample: `#FF5733`"
+            f"**{layers[li]['label']}** ke liye hex color bhejo\n"
+            "Example: `#FF5733` ya `FF5733`"
         )
         await query.answer()
 
-    # ── scale menu ────────────────────────────────────
-    elif data.startswith("scale|"):
-        layer_name = data.split("|", 1)[1]
-        await query.message.edit_text(
-            f"Choose scale for **{layer_name}** 📐",
-            reply_markup=scale_kb(layer_name)
-        )
-
-    # ── apply scale ───────────────────────────────────
-    elif data.startswith("doscale|"):
-        _, layer_name, val = data.split("|")
-        s = float(val)
-        scale_layer(lottie, layer_name, s, s)
-        await query.answer(f"scaled to {val}% ✅")
-        await query.message.edit_text(
-            f"**{layer_name}** scaled to {val}%!\nWhat else?",
-            reply_markup=layer_menu_kb(layer_name)
-        )
-
-    # ── rotate menu ───────────────────────────────────
-    elif data.startswith("rotate|"):
-        layer_name = data.split("|", 1)[1]
-        await query.message.edit_text(
-            f"Choose rotation for **{layer_name}** 🔄",
-            reply_markup=rotate_kb(layer_name)
-        )
-
-    # ── apply rotation ────────────────────────────────
-    elif data.startswith("dorotate|"):
-        _, layer_name, val = data.split("|")
-        rotate_layer(lottie, layer_name, float(val))
-        await query.answer(f"rotated to {val}° ✅")
-        await query.message.edit_text(
-            f"**{layer_name}** rotated to {val}°!\nWhat else?",
-            reply_markup=layer_menu_kb(layer_name)
-        )
-
-    # ── export ────────────────────────────────────────
-    elif data == "export":
-        await query.answer("generating sticker...")
-        await query.message.edit_text("exporting your sticker... ⚙️")
-
-        tmpdir = session["path"]
-        out_path = os.path.join(tmpdir, "output.tgs")
-        save_lottie_as_tgs(lottie, out_path)
-        await query.message.reply_sticker(out_path)
+    # ── Export ────────────────────────────────────────
+    elif data == "EXPORT":
+        await query.answer("generating...")
+        await query.message.edit_text("sticker bana raha hoon... ⚙️")
+        out = os.path.join(sess["path"], "out.tgs")
+        save_tgs(lottie, out)
+        await query.message.reply_sticker(out)
         await query.message.delete()
-
-        # clean up
-        sessions.pop(user_id, None)
+        sessions.pop(uid, None)
 
     else:
-        await query.answer("unknown action")
+        await query.answer("unknown")
 
 
-# ── Handle text input for custom hex colors ──────────────
+# ── Text input (custom hex) ───────────────────────────────
 @app.on_message(filters.text & ~filters.command(["start"]))
-async def handle_text_input(client: Client, message: Message):
-    user_id = message.from_user.id
-    session = sessions.get(user_id)
+async def text_input(_, message: Message):
+    uid  = message.from_user.id
+    sess = sessions.get(uid)
 
-    if session is None or session.get("waiting_for") is None:
-        await message.reply("send a .json or .tgs file to begin 🙂")
+    if not sess or not sess.get("waiting"):
+        await message.reply("pehle .json ya .tgs file bhejo 🙂")
         return
 
-    action, layer_name = session["waiting_for"]
-    session["waiting_for"] = None
+    action, li = sess["waiting"]
+    sess["waiting"] = None
+    lottie = sess["json"]
+    layers = sess["layers"]
 
     if action == "hex":
-        hex_str = message.text.strip().lstrip("#")
+        h = message.text.strip().lstrip("#")
         try:
-            if len(hex_str) == 6:
-                r = int(hex_str[0:2], 16) / 255
-                g = int(hex_str[2:4], 16) / 255
-                b = int(hex_str[4:6], 16) / 255
+            if len(h) == 6:
+                r, g, b = int(h[0:2],16)/255, int(h[2:4],16)/255, int(h[4:6],16)/255
                 rgba = [r, g, b, 1.0]
-            elif len(hex_str) == 8:
-                r = int(hex_str[0:2], 16) / 255
-                g = int(hex_str[2:4], 16) / 255
-                b = int(hex_str[4:6], 16) / 255
-                a = int(hex_str[6:8], 16) / 255
+            elif len(h) == 8:
+                r, g, b, a = int(h[0:2],16)/255, int(h[2:4],16)/255, int(h[4:6],16)/255, int(h[6:8],16)/255
                 rgba = [r, g, b, a]
             else:
-                raise ValueError("bad length")
-
-            recolor_layer(session["json"], layer_name, rgba)
-            lottie = session["json"]
-            layer_names = get_layer_names(lottie)
+                raise ValueError
+            apply_color_to_layer(lottie, layers[li], rgba)
             await message.reply(
-                f"**{layer_name}** recolored to `#{hex_str}` ✅\nWhat else?",
-                reply_markup=layer_menu_kb(layer_name)
+                f"**{layers[li]['label']}** → `#{h}` ✅\nAur kya karna hai?",
+                reply_markup=layer_actions_kb(li)
             )
         except Exception:
-            await message.reply("invalid hex 😬 try again like `#FF5733`")
-            session["waiting_for"] = ("hex", layer_name)
+            await message.reply("galat hex hai 😬 phir se bhejo jaise `#FF5733`")
+            sess["waiting"] = ("hex", li)
 
 
-# ── Run ──────────────────────────────────────────────────
 if __name__ == "__main__":
     print("Bot chalu ho gaya...")
     app.run()
