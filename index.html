@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Sticker Editor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#0a0a0f;
+  --s1:#13131a;
+  --s2:#1c1c26;
+  --s3:#252533;
+  --accent:#6c63ff;
+  --accent2:#ff6b9d;
+  --accent3:#00d4aa;
+  --text:#eeeef5;
+  --muted:#6b6b88;
+  --r:12px;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;user-select:none}
+
+/* HEADER */
+#header{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--s1);border-bottom:1px solid rgba(255,255,255,0.05)}
+#header h1{font-size:13px;font-weight:700;letter-spacing:.5px;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+#btn-undo{background:var(--s3);border:none;color:var(--text);padding:6px 12px;border-radius:8px;font-size:12px;cursor:pointer}
+
+/* PREVIEW */
+#preview{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 0 8px;background:var(--s1);position:relative}
+#canvas-outer{position:relative;width:180px;height:180px}
+#canvas-bg{position:absolute;inset:0;border-radius:16px;overflow:hidden}
+#lottie-wrap{position:absolute;inset:0;border-radius:16px;overflow:hidden}
+#lottie-el{width:100%;height:100%}
+#fx-canvas{position:absolute;inset:0;width:180px;height:180px;pointer-events:none;border-radius:16px}
+#anim-wrap{position:absolute;inset:0;pointer-events:none;border-radius:16px;overflow:hidden}
+
+/* layer highlight ring */
+#layer-ring{position:absolute;inset:0;border-radius:16px;pointer-events:none;border:2px solid transparent;transition:border-color .2s;z-index:10}
+
+/* TABS */
+#tabs{flex:0 0 auto;display:flex;background:var(--s1);border-bottom:1px solid rgba(255,255,255,0.05);overflow-x:auto;scrollbar-width:none}
+#tabs::-webkit-scrollbar{display:none}
+.tab{flex:0 0 auto;padding:9px 14px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;letter-spacing:.4px;text-transform:uppercase;transition:all .2s}
+.tab.active{color:var(--accent);border-color:var(--accent)}
+
+/* PANELS */
+#panels{flex:1;overflow-y:auto;padding:10px 12px 16px;scrollbar-width:thin;scrollbar-color:var(--accent) transparent}
+.panel{display:none}.panel.active{display:block}
+.sec{font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin:12px 0 7px}
+
+/* LAYER CARDS */
+.layer-card{background:var(--s2);border:1.5px solid rgba(255,255,255,0.06);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
+.layer-card:active,.layer-card.selected{border-color:var(--accent);background:var(--s3)}
+.layer-card-header{display:flex;align-items:center;gap:8px}
+.layer-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.layer-name{font-size:12px;font-weight:600;flex:1}
+.layer-type{font-size:10px;color:var(--muted);background:var(--s3);padding:2px 7px;border-radius:20px}
+.layer-controls{margin-top:10px;display:none}
+.layer-card.selected .layer-controls{display:block}
+
+/* GRIDS */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+
+/* BUTTONS */
+.btn{background:var(--s3);border:1.5px solid rgba(255,255,255,0.07);border-radius:var(--r);padding:10px 6px;text-align:center;cursor:pointer;font-size:11px;color:var(--text);display:flex;flex-direction:column;align-items:center;gap:5px;transition:all .15s;-webkit-tap-highlight-color:transparent}
+.btn .ico{font-size:20px;line-height:1}
+.btn:active,.btn.on{background:var(--accent);border-color:var(--accent);transform:scale(0.96)}
+.btn.on2{background:var(--accent2);border-color:var(--accent2)}
+.btn.on3{background:var(--accent3);border-color:var(--accent3)}
+
+/* SLIDERS */
+.srow{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.srow label{font-size:11px;color:var(--muted);width:70px;flex-shrink:0}
+.srow input[type=range]{flex:1;accent-color:var(--accent)}
+.srow .v{font-size:11px;color:var(--accent);width:34px;text-align:right;font-weight:600}
+
+/* SWATCHES */
+.swatches{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.sw{width:32px;height:32px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s;flex-shrink:0}
+.sw:active,.sw.on{border-color:#fff;transform:scale(1.15)}
+.sw.rainbow{background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red)}
+input[type=color]{position:absolute;opacity:0;width:0;height:0}
+
+/* TEXT INPUT */
+.tinput{width:100%;background:var(--s2);border:1.5px solid rgba(255,255,255,0.08);border-radius:var(--r);padding:9px 11px;color:var(--text);font-size:13px;outline:none;margin-bottom:8px}
+.tinput:focus{border-color:var(--accent)}
+
+/* TOGGLE */
+.trow{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+.trow span{font-size:12px}
+.tog{width:38px;height:21px;background:var(--s3);border-radius:11px;position:relative;cursor:pointer;transition:.2s;flex-shrink:0}
+.tog.on{background:var(--accent)}
+.tog::after{content:'';position:absolute;top:3px;left:3px;width:15px;height:15px;border-radius:50%;background:#fff;transition:.2s}
+.tog.on::after{left:20px}
+
+/* ANIMATION PREVIEW BADGE */
+#anim-badge{position:absolute;top:6px;left:6px;font-size:9px;font-weight:700;background:rgba(108,99,255,0.9);color:#fff;padding:2px 7px;border-radius:20px;display:none;backdrop-filter:blur(4px)}
+
+/* EXPORT */
+#export-bar{flex:0 0 auto;padding:8px 12px;background:var(--s1);border-top:1px solid rgba(255,255,255,0.05);display:flex;gap:8px}
+#btn-export{flex:1;height:42px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:var(--r);color:#fff;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:.3px}
+#btn-export:active{opacity:.85;transform:scale(.98)}
+
+/* TOAST */
+#toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:rgba(108,99,255,.95);color:#fff;padding:7px 16px;border-radius:20px;font-size:11px;font-weight:600;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap;backdrop-filter:blur(8px);z-index:999}
+#toast.show{opacity:1}
+
+/* WHAT'S POSSIBLE INFO */
+.info-card{background:var(--s2);border-radius:var(--r);padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--accent)}
+.info-card h4{font-size:11px;font-weight:700;margin-bottom:4px;color:var(--accent)}
+.info-card p{font-size:11px;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>✦ STICKER EDITOR</h1>
+  <button id="btn-undo" onclick="undo()">↩ Undo</button>
+</div>
+
+<div id="preview">
+  <div id="canvas-outer">
+    <div id="canvas-bg"></div>
+    <div id="lottie-wrap"><div id="lottie-el"></div></div>
+    <canvas id="fx-canvas" width="360" height="360"></canvas>
+    <div id="anim-wrap"></div>
+    <div id="layer-ring"></div>
+    <div id="anim-badge">● ANIMATED</div>
+  </div>
+</div>
+
+<div id="tabs">
+  <div class="tab active" data-p="layers">Layers</div>
+  <div class="tab" data-p="effects">Effects</div>
+  <div class="tab" data-p="animations">Animations</div>
+  <div class="tab" data-p="text">Text</div>
+  <div class="tab" data-p="background">Background</div>
+  <div class="tab" data-p="filters">Filters</div>
+  <div class="tab" data-p="info">What's Possible</div>
+</div>
+
+<div id="panels">
+
+  <!-- LAYERS -->
+  <div class="panel active" id="panel-layers">
+    <p class="sec">Sticker Layers — click to edit</p>
+    <div id="layer-list"></div>
+  </div>
+
+  <!-- EFFECTS -->
+  <div class="panel" id="panel-effects">
+    <p class="sec">Overlay Effects</p>
+    <div class="grid3">
+      <div class="btn" onclick="toggleFx('glow',this)"><span class="ico">✨</span>Glow</div>
+      <div class="btn" onclick="toggleFx('neon',this)"><span class="ico">💜</span>Neon</div>
+      <div class="btn" onclick="toggleFx('fire',this)"><span class="ico">🔥</span>Fire</div>
+      <div class="btn" onclick="toggleFx('sparkle',this)"><span class="ico">⭐</span>Sparkle</div>
+      <div class="btn" onclick="toggleFx('rainbow',this)"><span class="ico">🌈</span>Rainbow</div>
+      <div class="btn" onclick="toggleFx('vignette',this)"><span class="ico">🌒</span>Vignette</div>
+      <div class="btn" onclick="toggleFx('glitch',this)"><span class="ico">📺</span>Glitch</div>
+      <div class="btn" onclick="toggleFx('shadow',this)"><span class="ico">🌑</span>Shadow</div>
+      <div class="btn" onclick="toggleFx('snow',this)"><span class="ico">❄️</span>Snow</div>
+      <div class="btn" onclick="toggleFx('hearts',this)"><span class="ico">💕</span>Hearts</div>
+      <div class="btn" onclick="toggleFx('electric',this)"><span class="ico">⚡</span>Electric</div>
+      <div class="btn" onclick="toggleFx('matrix',this)"><span class="ico">🟩</span>Matrix</div>
+    </div>
+    <p class="sec">Effect Intensity</p>
+    <div class="srow"><label>Mix</label><input type="range" min="0" max="100" value="80" oninput="st.fxMix=this.value/100;updateVal(this,'mix-v');renderFx()"><span class="v" id="mix-v">80</span></div>
+    <p class="sec">Tint Color</p>
+    <div class="swatches" id="tint-sw">
+      <div class="sw on" style="background:#fff" onclick="setTint('#ffffff',this)"></div>
+      <div class="sw" style="background:#6c63ff" onclick="setTint('#6c63ff',this)"></div>
+      <div class="sw" style="background:#ff6b9d" onclick="setTint('#ff6b9d',this)"></div>
+      <div class="sw" style="background:#00d4aa" onclick="setTint('#00d4aa',this)"></div>
+      <div class="sw" style="background:#ffcc00" onclick="setTint('#ffcc00',this)"></div>
+      <div class="sw" style="background:#ff4444" onclick="setTint('#ff4444',this)"></div>
+      <div class="sw" style="background:#00aaff" onclick="setTint('#00aaff',this)"></div>
+      <div class="sw rainbow" onclick="document.getElementById('tint-pick').click()"></div>
+      <input type="color" id="tint-pick" value="#ffffff" onchange="setTint(this.value,null)">
+    </div>
+    <div class="srow"><label>Tint Amount</label><input type="range" min="0" max="80" value="0" oninput="st.tintAmt=this.value;updateVal(this,'tint-v');renderFx()"><span class="v" id="tint-v">0</span></div>
+  </div>
+
+  <!-- ANIMATIONS -->
+  <div class="panel" id="panel-animations">
+    <p class="sec">Inject New Animations into JSON</p>
+    <div class="grid3">
+      <div class="btn" id="an-shake" onclick="injectAnim('shake',this)"><span class="ico">🫨</span>Shake</div>
+      <div class="btn" id="an-bounce" onclick="injectAnim('bounce',this)"><span class="ico">💓</span>Bounce</div>
+      <div class="btn" id="an-spin" onclick="injectAnim('spin',this)"><span class="ico">🌀</span>Spin</div>
+      <div class="btn" id="an-pulse" onclick="injectAnim('pulse',this)"><span class="ico">📳</span>Pulse</div>
+      <div class="btn" id="an-wobble" onclick="injectAnim('wobble',this)"><span class="ico">🌊</span>Wobble</div>
+      <div class="btn" id="an-pop" onclick="injectAnim('pop',this)"><span class="ico">💥</span>Pop</div>
+      <div class="btn" id="an-float" onclick="injectAnim('float',this)"><span class="ico">🎈</span>Float</div>
+      <div class="btn" id="an-jelly" onclick="injectAnim('jelly',this)"><span class="ico">🫧</span>Jelly</div>
+      <div class="btn" id="an-swing" onclick="injectAnim('swing',this)"><span class="ico">🎪</span>Swing</div>
+    </div>
+    <p class="sec">CSS Preview Animations</p>
+    <div class="grid3">
+      <div class="btn" onclick="setCssAnim('shake-css',this)"><span class="ico">📳</span>Shake</div>
+      <div class="btn" onclick="setCssAnim('spin-css',this)"><span class="ico">🔄</span>Spin</div>
+      <div class="btn" onclick="setCssAnim('bounce-css',this)"><span class="ico">⬆️</span>Bounce</div>
+      <div class="btn" onclick="setCssAnim('pulse-css',this)"><span class="ico">💗</span>Pulse</div>
+      <div class="btn" onclick="setCssAnim('swing-css',this)"><span class="ico">↔️</span>Swing</div>
+      <div class="btn" onclick="setCssAnim('none',this)"><span class="ico">⏹️</span>None</div>
+    </div>
+    <p class="sec">Playback</p>
+    <div class="srow"><label>Speed</label><input type="range" min="10" max="300" value="100" oninput="setSpeed(this.value)"><span class="v" id="spd-v">1x</span></div>
+    <div class="srow"><label>Start %</label><input type="range" min="0" max="100" value="0" oninput="setStartF(this.value)"><span class="v" id="sf-v">0%</span></div>
+    <div class="srow"><label>End %</label><input type="range" min="0" max="100" value="100" oninput="setEndF(this.value)"><span class="v" id="ef-v">100%</span></div>
+    <p class="sec">Direction</p>
+    <div class="grid3">
+      <div class="btn" onclick="setDir(1,this)"><span class="ico">▶️</span>Forward</div>
+      <div class="btn" onclick="setDir(-1,this)"><span class="ico">◀️</span>Reverse</div>
+      <div class="btn" onclick="toggleLoop(this)"><span class="ico">🔁</span>Loop</div>
+    </div>
+  </div>
+
+  <!-- TEXT -->
+  <div class="panel" id="panel-text">
+    <p class="sec">Text Overlay</p>
+    <input class="tinput" id="text-in" placeholder="type your text..." oninput="st.text=this.value;renderFx()">
+    <div class="srow"><label>Size</label><input type="range" min="12" max="80" value="32" oninput="st.fontSize=+this.value;updateVal(this,'fs-v');renderFx()"><span class="v" id="fs-v">32</span></div>
+    <p class="sec">Color</p>
+    <div class="swatches">
+      <div class="sw on" style="background:#fff" onclick="st.textColor='#ffffff';renderFx()"></div>
+      <div class="sw" style="background:#000;border:1px solid #444" onclick="st.textColor='#000000';renderFx()"></div>
+      <div class="sw" style="background:#6c63ff" onclick="st.textColor='#6c63ff';renderFx()"></div>
+      <div class="sw" style="background:#ff6b9d" onclick="st.textColor='#ff6b9d';renderFx()"></div>
+      <div class="sw" style="background:#ffcc00" onclick="st.textColor='#ffcc00';renderFx()"></div>
+      <div class="sw rainbow" onclick="document.getElementById('text-pick').click()"></div>
+      <input type="color" id="text-pick" value="#ffffff" onchange="st.textColor=this.value;renderFx()">
+    </div>
+    <p class="sec">Position</p>
+    <div class="grid3">
+      <div class="btn" onclick="st.textPos='top';renderFx()"><span class="ico">⬆️</span>Top</div>
+      <div class="btn" onclick="st.textPos='center';renderFx()"><span class="ico">⬛</span>Center</div>
+      <div class="btn" onclick="st.textPos='bottom';renderFx()"><span class="ico">⬇️</span>Bottom</div>
+    </div>
+    <div class="trow"><span>Shadow</span><div class="tog on" id="tog-tshadow" onclick="toggle('textShadow','tog-tshadow')"></div></div>
+    <div class="trow"><span>Bold</span><div class="tog" id="tog-tbold" onclick="toggle('textBold','tog-tbold')"></div></div>
+    <div class="trow"><span>Outline</span><div class="tog" id="tog-toutline" onclick="toggle('textOutline','tog-toutline')"></div></div>
+  </div>
+
+  <!-- BACKGROUND -->
+  <div class="panel" id="panel-background">
+    <p class="sec">Type</p>
+    <div class="grid3">
+      <div class="btn on" onclick="setBg('none',this)"><span class="ico">🔲</span>None</div>
+      <div class="btn" onclick="setBg('solid',this)"><span class="ico">⬛</span>Solid</div>
+      <div class="btn" onclick="setBg('gradient',this)"><span class="ico">🌅</span>Gradient</div>
+      <div class="btn" onclick="setBg('radial',this)"><span class="ico">🔵</span>Radial</div>
+      <div class="btn" onclick="setBg('dots',this)"><span class="ico">⚫</span>Dots</div>
+      <div class="btn" onclick="setBg('grid',this)"><span class="ico">▦</span>Grid</div>
+      <div class="btn" onclick="setBg('stripes',this)"><span class="ico">〰️</span>Stripes</div>
+      <div class="btn" onclick="setBg('noise',this)"><span class="ico">🌫️</span>Noise</div>
+      <div class="btn" onclick="setBg('confetti',this)"><span class="ico">🎉</span>Confetti</div>
+    </div>
+    <p class="sec">Color</p>
+    <div class="swatches">
+      <div class="sw on" style="background:#000;border:1px solid #444" onclick="st.bgColor='#000000';renderFx()"></div>
+      <div class="sw" style="background:#1a1a2e" onclick="st.bgColor='#1a1a2e';renderFx()"></div>
+      <div class="sw" style="background:#6c63ff" onclick="st.bgColor='#6c63ff';renderFx()"></div>
+      <div class="sw" style="background:#ff6b9d" onclick="st.bgColor='#ff6b9d';renderFx()"></div>
+      <div class="sw" style="background:#00d4aa" onclick="st.bgColor='#00d4aa';renderFx()"></div>
+      <div class="sw" style="background:#fff" onclick="st.bgColor='#ffffff';renderFx()"></div>
+      <div class="sw rainbow" onclick="document.getElementById('bg-pick').click()"></div>
+      <input type="color" id="bg-pick" value="#000000" onchange="st.bgColor=this.value;renderFx()">
+    </div>
+    <div class="srow"><label>Opacity</label><input type="range" min="0" max="100" value="100" oninput="st.bgOpacity=this.value/100;updateVal(this,'bgo-v');renderFx()"><span class="v" id="bgo-v">100</span></div>
+    <div class="srow"><label>Padding</label><input type="range" min="0" max="50" value="0" oninput="st.bgPad=+this.value;updateVal(this,'bgp-v');renderFx()"><span class="v" id="bgp-v">0</span></div>
+    <div class="trow"><span>Rounded</span><div class="tog" id="tog-bgr" onclick="toggle('bgRound','tog-bgr')"></div></div>
+  </div>
+
+  <!-- FILTERS -->
+  <div class="panel" id="panel-filters">
+    <p class="sec">Image Filters</p>
+    <div class="srow"><label>Brightness</label><input type="range" min="0" max="200" value="100" oninput="setF('brightness',this.value)"><span class="v" id="f-brightness">100</span></div>
+    <div class="srow"><label>Contrast</label><input type="range" min="0" max="200" value="100" oninput="setF('contrast',this.value)"><span class="v" id="f-contrast">100</span></div>
+    <div class="srow"><label>Saturate</label><input type="range" min="0" max="300" value="100" oninput="setF('saturate',this.value)"><span class="v" id="f-saturate">100</span></div>
+    <div class="srow"><label>Blur</label><input type="range" min="0" max="20" value="0" oninput="setF('blur',this.value)"><span class="v" id="f-blur">0</span></div>
+    <div class="srow"><label>Sepia</label><input type="range" min="0" max="100" value="0" oninput="setF('sepia',this.value)"><span class="v" id="f-sepia">0</span></div>
+    <div class="srow"><label>Hue</label><input type="range" min="0" max="360" value="0" oninput="setF('hue',this.value)"><span class="v" id="f-hue">0°</span></div>
+    <div class="srow"><label>Invert</label><input type="range" min="0" max="100" value="0" oninput="setF('invert',this.value)"><span class="v" id="f-invert">0</span></div>
+    <p class="sec">Presets</p>
+    <div class="grid3">
+      <div class="btn" onclick="preset('vivid')"><span class="ico">🌟</span>Vivid</div>
+      <div class="btn" onclick="preset('vintage')"><span class="ico">📷</span>Vintage</div>
+      <div class="btn" onclick="preset('noir')"><span class="ico">🎭</span>Noir</div>
+      <div class="btn" onclick="preset('cool')"><span class="ico">❄️</span>Cool</div>
+      <div class="btn" onclick="preset('warm')"><span class="ico">🌅</span>Warm</div>
+      <div class="btn" onclick="preset('normal')"><span class="ico">🔄</span>Reset</div>
+    </div>
+    <p class="sec">Transform</p>
+    <div class="srow"><label>Scale</label><input type="range" min="50" max="200" value="100" oninput="st.scale=this.value/100;updateVal(this,'sc-v',v=>+(v/100).toFixed(1)+'x');applyTransform()"><span class="v" id="sc-v">1x</span></div>
+    <div class="srow"><label>Rotate</label><input type="range" min="-180" max="180" value="0" oninput="st.rotate=+this.value;updateVal(this,'ro-v',v=>v+'°');applyTransform()"><span class="v" id="ro-v">0°</span></div>
+    <div class="grid3">
+      <div class="btn" onclick="flipIt('H')"><span class="ico">↔️</span>Flip H</div>
+      <div class="btn" onclick="flipIt('V')"><span class="ico">↕️</span>Flip V</div>
+      <div class="btn" onclick="resetTransform()"><span class="ico">🔄</span>Reset</div>
+    </div>
+  </div>
+
+  <!-- INFO -->
+  <div class="panel" id="panel-info">
+    <p class="sec">Your Sticker Structure</p>
+    <div class="info-card"><h4>11 Layers Detected</h4><p>1 precomp (logo asset), 8 animated shape layers, 2 null controllers</p></div>
+    <div class="info-card"><h4>✅ What you CAN do</h4><p>• Change fill colors of any shape layer<br>• Inject shake/bounce/spin/pulse animations into JSON<br>• Add overlay effects (glow, fire, sparkle etc.)<br>• Change playback speed & direction<br>• Add text, background, filters<br>• Export real .tgs file</p></div>
+    <div class="info-card" style="border-color:var(--accent2)"><h4 style="color:var(--accent2)">⚠️ Limitations</h4><p>• Animated properties (position, gradient) can't be recolored live — they play as-is<br>• Individual shape drag needs full Lottie editor like LottieFiles<br>• New rigged animations need After Effects</p></div>
+    <div class="info-card" style="border-color:var(--accent3)"><h4 style="color:var(--accent3)">🔥 Phase 2 Coming</h4><p>• Per-layer timeline<br>• 20+ particle systems<br>• Custom keyframe editor<br>• Shape path editor</p></div>
+  </div>
+
+</div>
+
+<div id="export-bar">
+  <button id="btn-export" onclick="exportSticker()">Export Sticker 🔥</button>
+</div>
+<div id="toast"></div>
+
+<!-- CSS ANIMATIONS -->
+<style>
+@keyframes css-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+@keyframes css-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes css-bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes css-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+@keyframes css-swing{0%,100%{transform:rotate(0deg)}25%{transform:rotate(-8deg)}75%{transform:rotate(8deg)}}
+.anim-shake-css{animation:css-shake .5s infinite}
+.anim-spin-css{animation:css-spin 2s linear infinite}
+.anim-bounce-css{animation:css-bounce .8s ease-in-out infinite}
+.anim-pulse-css{animation:css-pulse .8s ease-in-out infinite}
+.anim-swing-css{animation:css-swing .8s ease-in-out infinite}
+</style>
+
+<script>
+const BOT_API_URL = 'https://your-railway-app.up.railway.app'; // Railway URL yahan
+// ── STATE ──
+const st = {
+  lottieData: null,
+  modifiedLottie: null,
+  fxActive: new Set(),
+  fxMix: 0.8,
+  tint: '#ffffff',
+  tintAmt: 0,
+  text: '',
+  fontSize: 32,
+  textColor: '#ffffff',
+  textPos: 'bottom',
+  textShadow: true,
+  textBold: false,
+  textOutline: false,
+  bgType: 'none',
+  bgColor: '#000000',
+  bgOpacity: 1,
+  bgPad: 0,
+  bgRound: false,
+  filters: {brightness:100,contrast:100,saturate:100,blur:0,sepia:0,hue:0,invert:0},
+  scale: 1,
+  rotate: 0,
+  flipH: false,
+  flipV: false,
+  cssAnim: 'none',
+  injectedAnims: new Set(),
+};
+let history = [];
+let fxAnimId = null;
+let particleList = [];
+
+// ── INIT ──
+window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(location.search);
+  const token = params.get('token');
+  const BOT_API = window.BOT_API_URL || 'https://your-railway-app.up.railway.app';
+  if (token) {
+    try {
+      const res = await fetch(`${BOT_API}/sticker?token=${token}`);
+      if (!res.ok) throw new Error('not found');
+      const data = await res.json();
+      st.lottieData = data;
+      st.modifiedLottie = JSON.parse(JSON.stringify(data));
+      initLottie();
+      buildLayerList();
+    } catch(e) { toast('failed to load sticker 😕 ' + e.message); }
+  }
+  if (window.Telegram?.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
+
+  // Tab switching
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => {
+      document.querySelectorAll('.tab,.panel').forEach(el=>el.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById('panel-'+t.dataset.p).classList.add('active');
+    });
+  });
+
+  startFxLoop();
+});
+
+let lottieInst = null;
+function initLottie(data) {
+  if (lottieInst) lottieInst.destroy();
+  lottieInst = lottie.loadAnimation({
+    container: document.getElementById('lottie-el'),
+    renderer: 'svg',
+    loop: true,
+    autoplay: true,
+    animationData: data || st.modifiedLottie,
+  });
+}
+
+// ── LAYER LIST ──
+function buildLayerList() {
+  const d = st.modifiedLottie;
+  if (!d) return;
+  const list = document.getElementById('layer-list');
+  list.innerHTML = '';
+
+  const tyMap = {0:'precomp',1:'solid',2:'image',3:'null',4:'shape',5:'text'};
+
+  d.layers.forEach((layer, idx) => {
+    const ty = tyMap[layer.ty] || 'unknown';
+    if (ty === 'null') return; // skip null layers
+
+    // find fill colors
+    const colors = [];
+    findFills(layer.shapes||[], colors);
+
+    const card = document.createElement('div');
+    card.className = 'layer-card';
+    card.dataset.idx = idx;
+
+    const dotColor = colors.length ? `rgb(${colors[0].join(',')})` : '#666';
+
+    card.innerHTML = `
+      <div class="layer-card-header" onclick="selectLayer(${idx},this.parentElement)">
+        <div class="layer-dot" style="background:${dotColor}"></div>
+        <span class="layer-name">Layer ${idx} <span style="color:var(--muted);font-weight:400">${ty}</span></span>
+        <span class="layer-type">${ty==='precomp'?'Logo':'Shape'}</span>
+      </div>
+      <div class="layer-controls">
+        ${colors.length ? `
+        <p class="sec" style="margin-top:8px">Fill Colors</p>
+        <div class="swatches" id="fills-${idx}">
+          ${colors.map((c,ci)=>`
+            <div class="sw" style="background:rgb(${c.join(',')})" onclick="openColorPick(${idx},${ci})"></div>
+          `).join('')}
+          <div class="sw rainbow" onclick="document.getElementById('lp-${idx}').click()"></div>
+          <input type="color" id="lp-${idx}" value="${rgbToHex(colors[0]||[255,255,255])}" onchange="applyColorToLayer(${idx},0,this.value)">
+        </div>` : '<p style="font-size:11px;color:var(--muted);margin-top:8px">No editable fills (animated/gradient)</p>'}
+        <p class="sec">Layer Opacity</p>
+        <div class="srow"><label>Opacity</label><input type="range" min="0" max="100" value="100" oninput="setLayerOpacity(${idx},this.value)"><span class="v">100</span></div>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function selectLayer(idx, card) {
+  document.querySelectorAll('.layer-card').forEach(c=>c.classList.remove('selected'));
+  card.classList.add('selected');
+  // highlight ring
+  const ring = document.getElementById('layer-ring');
+  ring.style.borderColor = 'var(--accent)';
+  setTimeout(()=>ring.style.borderColor='transparent',1000);
+}
+
+function findFills(obj, out) {
+  if (Array.isArray(obj)) { obj.forEach(v=>findFills(v,out)); return; }
+  if (typeof obj !== 'object' || !obj) return;
+  if (obj.ty === 'fl') {
+    const c = obj.c?.k;
+    if (c && !obj.c.a && Array.isArray(c) && typeof c[0] === 'number') {
+      out.push([Math.round(c[0]*255), Math.round(c[1]*255), Math.round(c[2]*255)]);
+      out._refs = out._refs||[];
+      out._refs.push(obj.c);
+    }
+  }
+  Object.values(obj).forEach(v=>findFills(v,out));
+}
+
+function rgbToHex(rgb) {
+  return '#'+rgb.map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+
+function hexToRgb(hex) {
+  const r=parseInt(hex.slice(1,3),16)/255, g=parseInt(hex.slice(3,5),16)/255, b=parseInt(hex.slice(5,7),16)/255;
+  return [r,g,b];
+}
+
+function applyColorToLayer(layerIdx, fillIdx, hexColor) {
+  saveHistory();
+  const layer = st.modifiedLottie.layers[layerIdx];
+  const fills = [];
+  const refs = [];
+  collectFillRefs(layer.shapes||[], fills, refs);
+  if (refs[fillIdx]) {
+    const rgb = hexToRgb(hexColor);
+    refs[fillIdx].k = [...rgb, 1];
+  }
+  toast('color applied ✅');
+  initLottie();
+  // update swatch
+  const sw = document.querySelectorAll(`#fills-${layerIdx} .sw`)[fillIdx];
+  if (sw) sw.style.background = hexColor;
+}
+
+function collectFillRefs(obj, fills, refs) {
+  if (Array.isArray(obj)) { obj.forEach(v=>collectFillRefs(v,fills,refs)); return; }
+  if (typeof obj !== 'object'||!obj) return;
+  if (obj.ty==='fl' && obj.c && !obj.c.a) {
+    const k = obj.c.k;
+    if (Array.isArray(k) && typeof k[0]==='number') {
+      fills.push(k); refs.push(obj.c);
+    }
+  }
+  Object.values(obj).forEach(v=>collectFillRefs(v,fills,refs));
+}
+
+function openColorPick(layerIdx, fillIdx) {
+  const input = document.createElement('input');
+  input.type = 'color';
+  const fills=[], refs=[];
+  collectFillRefs(st.modifiedLottie.layers[layerIdx].shapes||[], fills, refs);
+  if (refs[fillIdx]) {
+    const k = refs[fillIdx].k;
+    input.value = rgbToHex([Math.round(k[0]*255),Math.round(k[1]*255),Math.round(k[2]*255)]);
+  }
+  input.style.cssText='position:absolute;opacity:0;width:0;height:0';
+  document.body.appendChild(input);
+  input.click();
+  input.onchange = () => { applyColorToLayer(layerIdx, fillIdx, input.value); input.remove(); };
+}
+
+function setLayerOpacity(idx, val) {
+  const layer = st.modifiedLottie.layers[idx];
+  if (layer?.ks?.o) { layer.ks.o.k = +val; layer.ks.o.a = 0; }
+  initLottie();
+}
+
+// ── ANIMATION INJECT ──
+function injectAnim(type, btn) {
+  saveHistory();
+  const d = st.modifiedLottie;
+  const total = d.op - d.ip;
+
+  if (st.injectedAnims.has(type)) {
+    // remove - reload original
+    st.injectedAnims.delete(type);
+    btn.classList.remove('on');
+    toast(type + ' removed');
+    initLottie();
+    return;
+  }
+
+  st.injectedAnims.add(type);
+  btn.classList.add('on');
+
+  // Apply to all shape layers
+  d.layers.forEach(layer => {
+    if (layer.ty !== 4 && layer.ty !== 0) return;
+    const ks = layer.ks;
+
+    if (type === 'shake') {
+      const baseX = Array.isArray(ks.p?.k) ? ks.p.k[0] : 256;
+      const baseY = Array.isArray(ks.p?.k) ? ks.p.k[1] : 256;
+      ks.p = { a:1, k: genShakeKeys(baseX, baseY, total) };
+    }
+    else if (type === 'bounce') {
+      const baseScale = ks.s?.a ? 100 : (Array.isArray(ks.s?.k) ? ks.s.k[0] : 100);
+      ks.s = { a:1, k: genBounceKeys(baseScale, total) };
+    }
+    else if (type === 'spin') {
+      ks.r = { a:1, k: [
+        {t:0, s:[0], i:{x:0.5,y:0.5}, o:{x:0.5,y:0.5}},
+        {t:total, s:[360]}
+      ]};
+    }
+    else if (type === 'pulse') {
+      const base = ks.s?.a ? 100 : (Array.isArray(ks.s?.k) ? ks.s.k[0] : 100);
+      ks.s = { a:1, k: genPulseKeys(base, total) };
+    }
+    else if (type === 'wobble') {
+      const baseX = Array.isArray(ks.p?.k) ? ks.p.k[0] : 256;
+      const baseY = Array.isArray(ks.p?.k) ? ks.p.k[1] : 256;
+      ks.p = { a:1, k: genWobbleKeys(baseX, baseY, total) };
+    }
+    else if (type === 'pop') {
+      const base = ks.s?.a ? 100 : (Array.isArray(ks.s?.k) ? ks.s.k[0] : 100);
+      ks.s = { a:1, k: [
+        {t:0,s:[0,0],i:{x:0.5,y:1},o:{x:0.5,y:0}},
+        {t:8,s:[base*1.3,base*1.3],i:{x:0.5,y:1},o:{x:0.5,y:0}},
+        {t:14,s:[base*0.9,base*0.9],i:{x:0.5,y:1},o:{x:0.5,y:0}},
+        {t:20,s:[base,base]}
+      ]};
+    }
+    else if (type === 'float') {
+      const baseY = Array.isArray(ks.p?.k) ? ks.p.k[1] : 256;
+      const baseX = Array.isArray(ks.p?.k) ? ks.p.k[0] : 256;
+      ks.p = { a:1, k: genFloatKeys(baseX, baseY, total) };
+    }
+    else if (type === 'jelly') {
+      const base = ks.s?.a ? 100 : (Array.isArray(ks.s?.k) ? ks.s.k[0] : 100);
+      ks.s = { a:1, k: genJellyKeys(base, total) };
+    }
+    else if (type === 'swing') {
+      ks.r = { a:1, k: genSwingKeys(total) };
+    }
+  });
+
+  toast(type + ' injected into .tgs ✅');
+  document.getElementById('anim-badge').style.display = 'block';
+  initLottie();
+}
+
+function easeKey(t,s,ix=0.5,iy=1,ox=0.5,oy=0) {
+  return {t, s: Array.isArray(s)?s:[s,s], i:{x:ix,y:iy}, o:{x:ox,y:oy}};
+}
+
+function genShakeKeys(bx, by, total) {
+  const keys=[]; const period=10; const amp=8;
+  for(let t=0;t<total;t+=period/2) {
+    const dx = t%(period)===0 ? -amp : amp;
+    keys.push({t,s:[bx+dx,by,0],i:{x:0.5,y:0.5},o:{x:0.5,y:0.5}});
+  }
+  keys.push({t:total,s:[bx,by,0]});
+  return keys;
+}
+
+function genBounceKeys(base, total) {
+  const keys=[]; const period=20;
+  for(let t=0;t<total;t+=period) {
+    keys.push({t,s:[base,base],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period/2,s:[base*1.15,base*0.85],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period,s:[base,base],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+  }
+  return keys;
+}
+
+function genPulseKeys(base, total) {
+  const keys=[]; const period=30;
+  for(let t=0;t<total;t+=period) {
+    keys.push({t,s:[base,base],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period/2,s:[base*1.1,base*1.1],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+  }
+  keys.push({t:total,s:[base,base]});
+  return keys;
+}
+
+function genWobbleKeys(bx, by, total) {
+  const keys=[]; const period=15; const amp=5;
+  for(let t=0;t<total;t+=period) {
+    keys.push({t,s:[bx,by,0],i:{x:0.5,y:0.5},o:{x:0.5,y:0.5}});
+    keys.push({t:t+period/4,s:[bx+amp,by-amp/2,0],i:{x:0.5,y:0.5},o:{x:0.5,y:0.5}});
+    keys.push({t:t+period/2,s:[bx,by,0],i:{x:0.5,y:0.5},o:{x:0.5,y:0.5}});
+    keys.push({t:t+3*period/4,s:[bx-amp,by+amp/2,0],i:{x:0.5,y:0.5},o:{x:0.5,y:0.5}});
+  }
+  keys.push({t:total,s:[bx,by,0]});
+  return keys;
+}
+
+function genFloatKeys(bx, by, total) {
+  const keys=[]; const period=40; const amp=10;
+  for(let t=0;t<total;t+=period) {
+    keys.push({t,s:[bx,by,0],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period/2,s:[bx,by-amp,0],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+  }
+  keys.push({t:total,s:[bx,by,0]});
+  return keys;
+}
+
+function genJellyKeys(base, total) {
+  const keys=[]; const period=20;
+  for(let t=0;t<total;t+=period) {
+    keys.push({t,s:[base,base],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+5,s:[base*1.2,base*0.8],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+10,s:[base*0.85,base*1.15],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+15,s:[base*1.05,base*0.97],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period,s:[base,base],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+  }
+  return keys;
+}
+
+function genSwingKeys(total) {
+  const keys=[]; const period=25; const amp=12;
+  for(let t=0;t<total;t+=period) {
+    keys.push({t,s:[0],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period/4,s:[amp],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+period/2,s:[0],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+    keys.push({t:t+3*period/4,s:[-amp],i:{x:0.5,y:1},o:{x:0.5,y:0}});
+  }
+  keys.push({t:total,s:[0]});
+  return keys;
+}
+
+// ── CSS ANIMATIONS ──
+function setCssAnim(type, btn) {
+  document.querySelectorAll('#panel-animations .btn').forEach(b=>b.classList.remove('on2'));
+  st.cssAnim = type;
+  const wrap = document.getElementById('canvas-outer');
+  wrap.className = type==='none' ? '' : 'anim-'+type;
+  if(type!=='none') btn.classList.add('on2');
+}
+
+// ── PLAYBACK ──
+function setSpeed(v) {
+  lottieInst?.setSpeed(v/100);
+  document.getElementById('spd-v').textContent = (v/100).toFixed(1)+'x';
+}
+function setStartF(v) {
+  document.getElementById('sf-v').textContent=v+'%';
+  const t=(st.modifiedLottie?.op||100)*(v/100);
+  lottieInst?.playSegments([t, st.endF||st.modifiedLottie?.op], true);
+  st.startF=t;
+}
+function setEndF(v) {
+  document.getElementById('ef-v').textContent=v+'%';
+  st.endF = (st.modifiedLottie?.op||100)*(v/100);
+  lottieInst?.playSegments([st.startF||0, st.endF], true);
+}
+function setDir(d, btn) {
+  lottieInst?.setDirection(d);
+  lottieInst?.play();
+}
+function toggleLoop(btn) {
+  lottieInst.loop = !lottieInst.loop;
+  btn.classList.toggle('on');
+}
+
+// ── EFFECTS CANVAS ──
+function startFxLoop() {
+  const canvas = document.getElementById('fx-canvas');
+  const ctx = canvas.getContext('2d');
+  let frame = 0;
+  function loop() {
+    frame++;
+    ctx.clearRect(0,0,360,360);
+    renderFxFrame(ctx, frame);
+    fxAnimId = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function renderFx() { /* triggered by state changes — loop handles it */ }
+
+function renderFxFrame(ctx, frame) {
+  const fx = st.fxActive;
+  const mix = st.fxMix;
+  const W=360, H=360, cx=W/2, cy=H/2;
+
+  // BACKGROUND first (destination-over equivalent via save/restore)
+  drawBg(ctx, W, H);
+
+  // GLOW
+  if (fx.has('glow')) {
+    const g = ctx.createRadialGradient(cx,cy,40,cx,cy,160);
+    const col = st.tint;
+    g.addColorStop(0,hexA(col,0));
+    g.addColorStop(0.6,hexA(col,0.2*mix));
+    g.addColorStop(1,hexA(col,0));
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  }
+
+  // NEON BORDER
+  if (fx.has('neon')) {
+    ctx.save();
+    const pulse = 0.6+0.4*Math.sin(frame*0.08);
+    ctx.strokeStyle=hexA('#cc00ff',pulse*mix);
+    ctx.lineWidth=3; ctx.shadowBlur=20; ctx.shadowColor='#ff00ff';
+    ctx.strokeRect(10,10,W-20,H-20); ctx.restore();
+  }
+
+  // FIRE
+  if (fx.has('fire')) {
+    if (frame%2===0) particleList.push({x:cx+(Math.random()-.5)*120,y:H-20,vx:(Math.random()-.5)*1.5,vy:-(1+Math.random()*2.5),life:1,size:4+Math.random()*8,type:'fire'});
+    particleList = particleList.filter(p=>p.life>0);
+    particleList.forEach(p=>{
+      if(p.type!=='fire')return;
+      p.x+=p.vx; p.y+=p.vy; p.life-=0.02; p.size*=0.99;
+      const alpha=p.life*mix;
+      ctx.save();
+      const fg=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.size);
+      fg.addColorStop(0,`rgba(255,220,0,${alpha})`);
+      fg.addColorStop(0.5,`rgba(255,80,0,${alpha*0.6})`);
+      fg.addColorStop(1,'rgba(255,0,0,0)');
+      ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); ctx.restore();
+    });
+  }
+
+  // SPARKLE
+  if (fx.has('sparkle')) {
+    if (frame%4===0) particleList.push({x:Math.random()*W,y:Math.random()*H,life:1,size:2+Math.random()*4,type:'sparkle'});
+    particleList.forEach(p=>{
+      if(p.type!=='sparkle')return;
+      p.life-=0.03;
+      ctx.save(); ctx.fillStyle=`rgba(255,255,255,${p.life*mix})`; ctx.shadowBlur=8; ctx.shadowColor='#fff';
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); ctx.restore();
+    });
+  }
+
+  // SNOW
+  if (fx.has('snow')) {
+    if (frame%3===0) particleList.push({x:Math.random()*W,y:-10,vy:0.5+Math.random(),vx:(Math.random()-.5)*0.5,life:1,size:1.5+Math.random()*2.5,type:'snow'});
+    particleList.forEach(p=>{
+      if(p.type!=='snow')return;
+      p.x+=p.vx; p.y+=p.vy; if(p.y>H) p.life=0;
+      ctx.save(); ctx.fillStyle=`rgba(255,255,255,${0.8*mix})`; ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); ctx.restore();
+    });
+  }
+
+  // HEARTS
+  if (fx.has('hearts')) {
+    if (frame%8===0) particleList.push({x:cx+(Math.random()-.5)*80,y:H,vy:-(0.8+Math.random()),life:1,size:8+Math.random()*8,type:'heart'});
+    particleList.forEach(p=>{
+      if(p.type!=='heart')return;
+      p.y+=p.vy; p.life-=0.01; if(p.y<-20) p.life=0;
+      ctx.save(); ctx.fillStyle=hexA('#ff6b9d',p.life*mix); ctx.font=`${p.size}px serif`;
+      ctx.fillText('♥',p.x,p.y); ctx.restore();
+    });
+  }
+
+  // ELECTRIC
+  if (fx.has('electric')) {
+    if (frame%3===0) {
+      ctx.save(); ctx.strokeStyle=hexA('#00aaff',mix*0.8); ctx.lineWidth=1.5; ctx.shadowBlur=10; ctx.shadowColor='#00aaff';
+      for(let i=0;i<3;i++){
+        ctx.beginPath();
+        let x=Math.random()*W, y=0;
+        ctx.moveTo(x,y);
+        while(y<H){y+=8;x+=(Math.random()-.5)*20;ctx.lineTo(x,y);}
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // MATRIX
+  if (fx.has('matrix')) {
+    ctx.save(); ctx.fillStyle=hexA('#00ff41',0.15*mix);
+    ctx.font='10px monospace';
+    for(let i=0;i<12;i++){
+      const x=(i/12)*W, y=((frame*2+i*20)%H);
+      ctx.fillText(String.fromCharCode(65+Math.floor(Math.random()*26)),x,y);
+    }
+    ctx.restore();
+  }
+
+  // RAINBOW
+  if (fx.has('rainbow')) {
+    const rg = ctx.createLinearGradient(0,0,W,H);
+    const offset = (frame*0.005)%1;
+    ['#ff0000','#ff7700','#ffff00','#00ff00','#0000ff','#8800ff'].forEach((c,i,a)=>{
+      rg.addColorStop(Math.min(1,(i/a.length+offset)%1), c+'33');
+    });
+    ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
+  }
+
+  // VIGNETTE
+  if (fx.has('vignette')) {
+    const vg=ctx.createRadialGradient(cx,cy,60,cx,cy,200);
+    vg.addColorStop(0,'rgba(0,0,0,0)');
+    vg.addColorStop(1,`rgba(0,0,0,${0.8*mix})`);
+    ctx.fillStyle=vg; ctx.fillRect(0,0,W,H);
+  }
+
+  // GLITCH
+  if (fx.has('glitch') && frame%6===0) {
+    ctx.save();
+    ctx.fillStyle=`rgba(255,0,0,${0.12*mix})`;  ctx.fillRect(Math.random()*20-10,Math.random()*H*0.3,W,15);
+    ctx.fillStyle=`rgba(0,255,255,${0.12*mix})`; ctx.fillRect(Math.random()*20,Math.random()*H*0.6+H*0.2,W,12);
+    ctx.restore();
+  }
+
+  // SHADOW
+  if (fx.has('shadow')) {
+    ctx.save();
+    ctx.fillStyle=`rgba(0,0,0,${0.4*mix})`; ctx.filter='blur(15px)';
+    ctx.fillRect(15,15,W,H); ctx.restore();
+  }
+
+  // TINT
+  if (st.tintAmt > 0) {
+    ctx.fillStyle = hexA(st.tint, st.tintAmt/100);
+    ctx.fillRect(0,0,W,H);
+  }
+
+  // TEXT
+  if (st.text) {
+    ctx.save();
+    ctx.font = `${st.textBold?'bold ':''} ${st.fontSize}px -apple-system,sans-serif`;
+    ctx.textAlign='center';
+    if(st.textShadow){ctx.shadowBlur=10;ctx.shadowColor='rgba(0,0,0,.9)';}
+    if(st.textOutline){ctx.strokeStyle='#000';ctx.lineWidth=3;const ty2=st.textPos==='top'?40:st.textPos==='bottom'?H-20:H/2;ctx.strokeText(st.text,cx,ty2);}
+    ctx.fillStyle=st.textColor;
+    const ty=st.textPos==='top'?40:st.textPos==='bottom'?H-20:H/2;
+    ctx.fillText(st.text,cx,ty);
+    ctx.restore();
+  }
+}
+
+function drawBg(ctx, W, H) {
+  if (st.bgType==='none') return;
+  const pad=st.bgPad*3;
+  const r = st.bgRound ? 40 : 0;
+  ctx.save();
+  ctx.globalCompositeOperation='destination-over';
+
+  if(r){ctx.beginPath();roundRectPath(ctx,pad,pad,W-pad*2,H-pad*2,r);ctx.clip();}
+
+  if(st.bgType==='solid'){
+    ctx.fillStyle=hexA(st.bgColor,st.bgOpacity);
+    ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+  } else if(st.bgType==='gradient'){
+    const g=ctx.createLinearGradient(pad,pad,W-pad,H-pad);
+    g.addColorStop(0,hexA(st.bgColor,st.bgOpacity));
+    g.addColorStop(1,hexA(shiftHue(st.bgColor,60),st.bgOpacity));
+    ctx.fillStyle=g; ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+  } else if(st.bgType==='radial'){
+    const g=ctx.createRadialGradient(W/2,H/2,0,W/2,H/2,W/2-pad);
+    g.addColorStop(0,hexA(st.bgColor,st.bgOpacity));
+    g.addColorStop(1,hexA(shiftHue(st.bgColor,120),st.bgOpacity));
+    ctx.fillStyle=g; ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+  } else if(st.bgType==='dots'){
+    ctx.fillStyle='#111'; ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+    ctx.fillStyle=hexA(st.bgColor,st.bgOpacity);
+    for(let x=pad+10;x<W-pad;x+=18) for(let y=pad+10;y<H-pad;y+=18){ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();}
+  } else if(st.bgType==='grid'){
+    ctx.fillStyle='#111'; ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+    ctx.strokeStyle=hexA(st.bgColor,st.bgOpacity*0.4); ctx.lineWidth=1;
+    for(let x=pad;x<W-pad;x+=20){ctx.beginPath();ctx.moveTo(x,pad);ctx.lineTo(x,H-pad);ctx.stroke();}
+    for(let y=pad;y<H-pad;y+=20){ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(W-pad,y);ctx.stroke();}
+  } else if(st.bgType==='stripes'){
+    ctx.fillStyle='#111'; ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+    ctx.strokeStyle=hexA(st.bgColor,st.bgOpacity*0.5); ctx.lineWidth=8;
+    for(let i=-W;i<W*2;i+=20){ctx.beginPath();ctx.moveTo(pad+i,pad);ctx.lineTo(pad+i+H,H-pad);ctx.stroke();}
+  } else if(st.bgType==='noise'){
+    ctx.fillStyle='#111'; ctx.fillRect(pad,pad,W-pad*2,H-pad*2);
+    for(let x=pad;x<W-pad;x+=2) for(let y=pad;y<H-pad;y+=2){
+      const v=Math.random(); ctx.fillStyle=hexA(st.bgColor,v*st.bgOpacity*0.3);
+      ctx.fillRect(x,y,2,2);
+    }
+  } else if(st.bgType==='confetti'){
+    const colors=['#ff6b9d','#6c63ff','#00d4aa','#ffcc00','#ff4444'];
+    if(!st._confetti) st._confetti=Array.from({length:30},()=>({x:Math.random()*W,y:Math.random()*H,r:2+Math.random()*4,c:colors[Math.floor(Math.random()*colors.length)],vy:0.5+Math.random()}));
+    st._confetti.forEach(p=>{p.y+=p.vy;if(p.y>H)p.y=0;ctx.fillStyle=hexA(p.c,st.bgOpacity);ctx.fillRect(p.x,p.y,p.r,p.r*1.5);});
+  }
+  ctx.restore();
+}
+
+function roundRectPath(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+
+// ── FILTERS ──
+function setF(name, v) {
+  st.filters[name]=+v;
+  const el=document.getElementById('f-'+name);
+  if(el) el.textContent = name==='hue'?v+'°':v;
+  applyFilters();
+}
+function applyFilters() {
+  const f=st.filters;
+  document.getElementById('lottie-el').style.filter=[
+    `brightness(${f.brightness}%)`,`contrast(${f.contrast}%)`,`saturate(${f.saturate}%)`,
+    `blur(${f.blur}px)`,`sepia(${f.sepia}%)`,`hue-rotate(${f.hue}deg)`,`invert(${f.invert}%)`
+  ].join(' ');
+}
+function preset(p){
+  const presets={normal:{brightness:100,contrast:100,saturate:100,blur:0,sepia:0,hue:0,invert:0},vivid:{brightness:110,contrast:130,saturate:200,blur:0,sepia:0,hue:0,invert:0},vintage:{brightness:90,contrast:85,saturate:60,blur:0,sepia:50,hue:0,invert:0},noir:{brightness:80,contrast:140,saturate:0,blur:0,sepia:0,hue:0,invert:0},cool:{brightness:100,contrast:110,saturate:80,blur:0,sepia:0,hue:200,invert:0},warm:{brightness:110,contrast:100,saturate:120,blur:0,sepia:20,hue:20,invert:0}};
+  Object.assign(st.filters,presets[p]);
+  applyFilters(); toast(p+' ✅');
+}
+
+// ── TRANSFORM ──
+function applyTransform() {
+  const wrap=document.getElementById('canvas-outer');
+  const sx=st.flipH?-st.scale:st.scale, sy=st.flipV?-st.scale:st.scale;
+  wrap.style.transform=`rotate(${st.rotate}deg) scale(${sx},${sy})`;
+}
+function flipIt(d){saveHistory();if(d==='H')st.flipH=!st.flipH;else st.flipV=!st.flipV;applyTransform();toast('flipped!');}
+function resetTransform(){st.scale=1;st.rotate=0;st.flipH=st.flipV=false;applyTransform();toast('reset');}
+
+// ── EFFECTS TOGGLES ──
+function toggleFx(name, btn) {
+  saveHistory();
+  if(st.fxActive.has(name)){st.fxActive.delete(name);btn.classList.remove('on');}
+  else{st.fxActive.add(name);btn.classList.add('on');}
+}
+function setTint(c, el) {
+  st.tint=c;
+  document.querySelectorAll('#tint-sw .sw').forEach(s=>s.classList.remove('on'));
+  if(el)el.classList.add('on');
+}
+function setBg(type, btn) {
+  st.bgType=type;
+  document.querySelectorAll('#panel-background .btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+}
+function toggle(key, togId) {
+  st[key]=!st[key];
+  document.getElementById(togId).classList.toggle('on',st[key]);
+}
+
+// ── HELPERS ──
+function hexA(hex, a) {
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+function shiftHue(hex, shift) {
+  const r=parseInt(hex.slice(1,3),16)/255,g=parseInt(hex.slice(3,5),16)/255,b=parseInt(hex.slice(5,7),16)/255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b);
+  let h=max===min?0:max===r?((g-b)/(max-min)+6)%6*60:max===g?(b-r)/(max-min)*60+120:(r-g)/(max-min)*60+240;
+  h=(h+shift)%360;
+  const s=max===min?0:(max-min)/max,v=max,c=v*s,x=c*(1-Math.abs((h/60)%2-1)),m=v-c;
+  let rr,gg,bb;
+  if(h<60){rr=c;gg=x;bb=0}else if(h<120){rr=x;gg=c;bb=0}else if(h<180){rr=0;gg=c;bb=x}else if(h<240){rr=0;gg=x;bb=c}else if(h<300){rr=x;gg=0;bb=c}else{rr=c;gg=0;bb=x}
+  const t=n=>Math.round((n+m)*255).toString(16).padStart(2,'0');
+  return `#${t(rr)}${t(gg)}${t(bb)}`;
+}
+function updateVal(input, id, fmt) {
+  const el=document.getElementById(id);
+  if(el) el.textContent = fmt ? fmt(input.value) : input.value;
+}
+function saveHistory() {
+  history.push(JSON.stringify({...st, fxActive:[...st.fxActive], injectedAnims:[...st.injectedAnims], modifiedLottie: st.modifiedLottie}));
+  if(history.length>15)history.shift();
+}
+function undo() {
+  if(!history.length){toast('nothing to undo');return;}
+  const prev=JSON.parse(history.pop());
+  Object.assign(st,prev);
+  st.fxActive=new Set(prev.fxActive);
+  st.injectedAnims=new Set(prev.injectedAnims);
+  initLottie(st.modifiedLottie);
+  applyFilters(); applyTransform();
+  toast('undone ↩️');
+}
+function toast(msg) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+// ── EXPORT ──
+function exportSticker() {
+  if (!st.modifiedLottie) return;
+  const payload = JSON.stringify(st.modifiedLottie);
+  if (window.Telegram?.WebApp) {
+    Telegram.WebApp.sendData(payload);
+    toast('sent to bot! 🔥');
+  } else {
+    // browser download for testing
+    const blob = new Blob([payload], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'edited_sticker.json';
+    a.click();
+    toast('downloaded! 🔥');
+  }
+}
+</script>
+</body>
+</html>
