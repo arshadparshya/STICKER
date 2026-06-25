@@ -71,7 +71,7 @@ async def handle_doc(_, message: Message):
     )
 
 
-@app.on_message(filters.web_app_data)
+@app.on_message(filters.create(lambda _, __, m: bool(m.web_app_data)))
 async def handle_webapp_data(_, message: Message):
     # webapp sends back the final lottie json
     import gzip, io
