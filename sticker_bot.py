@@ -3,18 +3,18 @@ import json
 import uuid
 import gzip
 import io
+import asyncio
 import tempfile
 from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-API_ID    = int(os.environ.get("API_ID", "0"))
-API_HASH  = os.environ.get("API_HASH", "")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+API_ID     = int(os.environ.get("API_ID", "0"))
+API_HASH   = os.environ.get("API_HASH", "")
+BOT_TOKEN  = os.environ.get("BOT_TOKEN", "")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://your-webapp-url.com")
 API_PORT   = int(os.environ.get("PORT", "8080"))
 
-# in-memory store: token -> lottie json string
 sticker_store = {}
 
 app = Client("sticker_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
@@ -42,9 +42,7 @@ async def handle_doc(_, message: Message):
         with open(path, "rb") as f:
             raw = f.read()
 
-    # if .tgs, it's gzip — decode to get lottie json
     if name.endswith(".tgs"):
-        import gzip
         try:
             raw = gzip.decompress(raw)
         except Exception:
@@ -57,11 +55,10 @@ async def handle_doc(_, message: Message):
         await message.reply("invalid json inside the file 😕")
         return
 
-    # encode lottie as url-safe base64 to pass to webapp
-    import base64
-    b64 = base64.urlsafe_b64encode(json.dumps(lottie).encode()).decode()
+    token = uuid.uuid4().hex[:12]
+    sticker_store[token] = json.dumps(lottie)
 
-    url = f"{WEBAPP_URL}?data={b64}"
+    url = f"{WEBAPP_URL}?token={token}"
 
     await message.reply(
         "your sticker is ready to edit ✨\n\ntap the button below to open the editor 👇",
@@ -73,8 +70,6 @@ async def handle_doc(_, message: Message):
 
 @app.on_message(filters.create(lambda _, __, m: bool(m.web_app_data)))
 async def handle_webapp_data(_, message: Message):
-    # webapp sends back the final lottie json
-    import gzip, io
     try:
         lottie_json = message.web_app_data.data
         compressed = gzip.compress(lottie_json.encode())
@@ -86,9 +81,9 @@ async def handle_webapp_data(_, message: Message):
         await message.reply(f"something went wrong exporting 😕\n{e}")
 
 
-# ── aiohttp API server (mini app fetches sticker data from here) ──
+# aiohttp API server
 async def api_get_sticker(request):
-    token = request.rel_url.query.get("token","")
+    token = request.rel_url.query.get("token", "")
     if token not in sticker_store:
         return web.Response(status=404, text="not found")
     return web.Response(
@@ -98,7 +93,11 @@ async def api_get_sticker(request):
     )
 
 async def api_options(request):
-    return web.Response(headers={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST","Access-Control-Allow-Headers":"*"})
+    return web.Response(headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST",
+        "Access-Control-Allow-Headers": "*"
+    })
 
 async def start_api():
     server = web.Application()
@@ -114,8 +113,7 @@ async def main():
     await start_api()
     await app.start()
     print("sticker bot is live...")
-    await app.idle()
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
