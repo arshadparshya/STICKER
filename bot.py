@@ -1,10 +1,4 @@
-import os
-import json
-import uuid
-import gzip
-import io
-import asyncio
-import tempfile
+import os, json, uuid, gzip, io, asyncio, tempfile
 from aiohttp import web
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
@@ -12,13 +6,18 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 API_ID     = int(os.environ.get("API_ID", "0"))
 API_HASH   = os.environ.get("API_HASH", "")
 BOT_TOKEN  = os.environ.get("BOT_TOKEN", "")
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://your-webapp-url.com")
 API_PORT   = int(os.environ.get("PORT", "8080"))
+# Railway gives you a public URL — set this in env vars
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").rstrip("/")
 
 sticker_store = {}
 
 app = Client("sticker_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
+# ── HTML MINI APP (embedded) ──────────────────────────────────────
+HTML = open("index.html").read() if os.path.exists("index.html") else "<h1>index.html not found</h1>"
+
+# ── BOT HANDLERS ─────────────────────────────────────────────────
 
 @app.on_message(filters.command("start"))
 async def start(_, message: Message):
@@ -28,7 +27,6 @@ async def start(_, message: Message):
         "━━━━━━━━━━━━━━━━━\n"
         "this Bot made By @GTK26"
     )
-
 
 @app.on_message(filters.document)
 async def handle_doc(_, message: Message):
@@ -58,15 +56,14 @@ async def handle_doc(_, message: Message):
     token = uuid.uuid4().hex[:12]
     sticker_store[token] = json.dumps(lottie)
 
-    url = f"{WEBAPP_URL}?token={token}"
+    webapp_url = f"{PUBLIC_URL}/app?token={token}"
 
     await message.reply(
-        "your sticker is ready to edit ✨\n\ntap the button below to open the editor 👇",
+        "your sticker is ready to edit ✨\n\ntap below to open the editor 👇",
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("🎨 Tap to Customize your sticker", web_app=WebAppInfo(url=url))
+            InlineKeyboardButton("🎨 Tap to Customize your sticker", web_app=WebAppInfo(url=webapp_url))
         ]])
     )
-
 
 @app.on_message(filters.create(lambda _, __, m: bool(m.web_app_data)))
 async def handle_webapp_data(_, message: Message):
@@ -77,11 +74,22 @@ async def handle_webapp_data(_, message: Message):
         buf.name = "sticker.tgs"
         buf.seek(0)
         await message.reply_sticker(buf)
+        await message.reply("here's your customised sticker! 🔥")
     except Exception as e:
-        await message.reply(f"something went wrong exporting 😕\n{e}")
+        await message.reply(f"something went wrong 😕\n{e}")
 
+# ── API + HTML SERVER ─────────────────────────────────────────────
 
-# aiohttp API server
+async def serve_app(request):
+    token = request.rel_url.query.get("token", "")
+    # inject bot api url + token into html
+    html = HTML.replace(
+        "%%BOT_API_URL%%", PUBLIC_URL
+    ).replace(
+        "%%TOKEN%%", token
+    )
+    return web.Response(text=html, content_type="text/html")
+
 async def api_get_sticker(request):
     token = request.rel_url.query.get("token", "")
     if token not in sticker_store:
@@ -99,18 +107,19 @@ async def api_options(request):
         "Access-Control-Allow-Headers": "*"
     })
 
-async def start_api():
+async def start_server():
     server = web.Application()
+    server.router.add_get("/app", serve_app)
     server.router.add_get("/sticker", api_get_sticker)
     server.router.add_options("/sticker", api_options)
     runner = web.AppRunner(server)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", API_PORT)
     await site.start()
-    print(f"API server running on port {API_PORT}")
+    print(f"Server running on port {API_PORT}")
 
 async def main():
-    await start_api()
+    await start_server()
     await app.start()
     print("sticker bot is live...")
     await asyncio.Event().wait()
