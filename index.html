@@ -335,7 +335,6 @@ input[type=color]{position:absolute;opacity:0;width:0;height:0}
 </style>
 
 <script>
-const BOT_API_URL = 'https://your-railway-app.up.railway.app'; // Railway URL yahan
 // ── STATE ──
 const st = {
   lottieData: null,
@@ -369,22 +368,25 @@ let fxAnimId = null;
 let particleList = [];
 
 // ── INIT ──
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  if (window.Telegram?.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
+
   const params = new URLSearchParams(location.search);
-  const token = params.get('token');
-  const BOT_API = window.BOT_API_URL || 'https://your-railway-app.up.railway.app';
-  if (token) {
+  const token = params.get('token') || '%%TOKEN%%';
+  const botApi = '%%BOT_API_URL%%';
+
+  if (token && !token.startsWith('%%')) {
     try {
-      const res = await fetch(`${BOT_API}/sticker?token=${token}`);
+      const res = await fetch(botApi + '/sticker?token=' + token);
       if (!res.ok) throw new Error('not found');
       const data = await res.json();
       st.lottieData = data;
       st.modifiedLottie = JSON.parse(JSON.stringify(data));
       initLottie();
       buildLayerList();
+      toast('sticker loaded! 🎨');
     } catch(e) { toast('failed to load sticker 😕 ' + e.message); }
   }
-  if (window.Telegram?.WebApp) { Telegram.WebApp.ready(); Telegram.WebApp.expand(); }
 
   // Tab switching
   document.querySelectorAll('.tab').forEach(t => {
